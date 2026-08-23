@@ -6,7 +6,7 @@ INCLUDE		:= include
 
 CFLAGS		:= -O2 -Wall -I$(INCLUDE) -I. -ffunction-sections -fdata-sections
 CXXFLAGS	:= $(CFLAGS) -fno-exceptions -fno-rtti
-LDFLAGS		:= -L. -Wl,--gc-sections
+LDFLAGS		:= -L. -Wl,--gc-sections -lusbd_stub -lio_stub -lfs_stub -lsysmodule_stub
 
 OBJS		:= $(BUILD)/main.o
 

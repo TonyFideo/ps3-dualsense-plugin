@@ -13,14 +13,14 @@ jobs:
       image: ps3dev/ps3dev:latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Build plugin
       run: |
         make
 
     - name: Upload Build Artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ps3-dualsense-plugin
         path: |

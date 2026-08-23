@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sysmodule/sysmodule.h>
+// #include <sys/usbd.h> // Let's check if this exists later
 
 // Entry point del VSH Plugin
 int module_start(size_t args, void *argp)
