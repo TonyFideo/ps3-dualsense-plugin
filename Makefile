@@ -8,7 +8,7 @@ CFLAGS		:= -O2 -Wall -I$(INCLUDE) -I. -ffunction-sections -fdata-sections
 CXXFLAGS	:= $(CFLAGS) -fno-exceptions -fno-rtti
 LDFLAGS		:= -L. -Wl,--gc-sections -lusbd_stub -lio_stub -lfs_stub -lsysmodule_stub
 
-OBJS		:= $(BUILD)/main.o
+OBJS		:= $(BUILD)/main.o $(BUILD)/dualsense_usb.o
 
 # Asegurarse de que el SDK está seteado
 ifeq ($(strip $(PSL1GHT)),)
