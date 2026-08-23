@@ -11,13 +11,32 @@ PSL1GHT actual (`CellUsbdLddOps`, `cellUsbd*`, `SYSMODULE_USBD`,
 ## Flujo implementado
 
 1. `usbRegisterExtraLdd` filtra Sony `054c:0ce6`.
-2. `attach` descubre configuración, interfaz HID y endpoints interrupt IN/OUT.
+2. `attach` recorre de forma acotada `wTotalLength` de la configuración,
+   valida cada descriptor y descubre por clase la interfaz HID y sus endpoints
+   interrupt IN/OUT. No se fija la interfaz 3, aunque sea la habitual del
+   DualSense estándar.
 3. Se crea un pad LDD; se intenta primero el modo de registro/inserción usado
    por PS3XPAD y se cae a `ioPadLddRegisterController` si no está disponible.
 4. Una transferencia interrupt asíncrona de 64 bytes se rearma en cada callback.
 5. El informe DualSense se traduce a `padData`; PS/Home (`report[10] & 1`) se
    inserta en `button[0]` como `0x0001`.
-6. `detach` invalida callbacks, retira el pad, cierra pipes y libera memoria.
+6. La barra luminosa usa dos informes USB `0x02` asíncronos y separados del
+   buffer de entrada: preparación y azul `0,0,128`. Si OUT no existe o falla,
+   solo se desactiva el LED; la lectura y el LDD continúan.
+7. `detach` invalida callbacks, registra contadores, retira el pad, cierra
+   pipes y libera ambos buffers USB.
+
+## Entorno y primera prueba
+
+El objetivo inicial es PS3 4.93, CFW Evilnat Cobra 8.5, modo P-CEX y un
+DualSense estándar Sony `054c:0ce6` por USB. Aún requiere validación física.
+Las interfaces de audio permanecen en alternate setting 0; no hay soporte para
+audio, micrófono, parlante, Bluetooth, vibración, touchpad ni sensores.
+
+El registro se guarda en `/dev_hdd0/tmp/dualsense_fix.log`. La primera prueba
+segura debe empezar sin PS3XPAD para el mismo VID/PID, verificar detección,
+primer `padData` insertado, botón PS y luz azul, y conservar un método para
+arrancar sin la entrada del plugin si VSH falla.
 
 ## SPRX con PSL1GHT
 
@@ -34,13 +53,13 @@ La CI verifica que el PRX sea `ET_DYN`, tenga entrada `0x0` y conserve
 ## Decisiones y límites
 
 - Un DualSense USB en esta versión inicial.
-- No se anuncia vibración hasta implementar entrada de actuadores y salida HID.
+- No se implementa vibración: la salida HID actual solo inicializa la luz azul.
 - El log solo recibe transiciones y el primer error de una ráfaga.
 - Bluetooth requiere otra vía de captura/hook; no se presenta como compatible.
 
 ## Próximos hitos
 
-1. Prueba real en CFW y HEN con el log de la consola.
+1. Prueba real en 4.93 Evilnat 8.5 P-CEX con el log de la consola.
 2. Camino Bluetooth sin duplicar el pad genérico.
 3. Actuadores LDD e informe USB de salida `0x02` para vibración.
 4. DualSense Edge, varios mandos, LED, batería, touchpad y sensores.
