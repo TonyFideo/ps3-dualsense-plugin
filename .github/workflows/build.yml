@@ -1,73 +1,166 @@
-name: Build DualSense Fix
+name: Build DualSense Fix (Official PS3 SDK)
 
 on:
   push:
     branches: [master, "testeo/**"]
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-env:
-  PS3DEV_TAG: nightly-2026-07-26
+concurrency:
+  group: ps3-sdk-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    runs-on: windows-2025
+    environment: ps3-sdk
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install pinned ps3dev toolchain
-        run: |
-          set -euo pipefail
-          archive="ps3dev-linux-X64.tar.gz"
-          curl -fL --retry 3 \
-            "https://github.com/ps3dev/ps3dev/releases/download/${PS3DEV_TAG}/${archive}" \
-            -o "$RUNNER_TEMP/$archive"
-          mkdir -p "$RUNNER_TEMP/ps3dev"
-          tar --no-same-owner -xzf "$RUNNER_TEMP/$archive" \
-            -C "$RUNNER_TEMP/ps3dev" --strip-components=1
-
-      - name: Build and inspect SPRX
+      - name: Download authorized private PS3 SDK
+        shell: pwsh
         env:
-          PS3DEV: ${{ runner.temp }}/ps3dev
-          PSL1GHT: ${{ runner.temp }}/ps3dev
+          GH_TOKEN: ${{ secrets.PS3_SDK_TOKEN }}
+          SDK_REPOSITORY: ${{ secrets.PS3_SDK_REPOSITORY }}
+          SDK_TAG: ${{ secrets.PS3_SDK_TAG }}
+          SDK_ASSET: ${{ secrets.PS3_SDK_ASSET }}
+          SDK_SHA256: ${{ secrets.PS3_SDK_SHA256 }}
         run: |
-          set -euo pipefail
-          export PATH="$PS3DEV/bin:$PS3DEV/ppu/bin:$PATH"
-          make clean all
-          test -s dualsense_fix.prx
-          test -s dualsense_fix.sprx
-          powerpc64-ps3-elf-readelf -h dualsense_fix.prx | tee build/header.txt
-          powerpc64-ps3-elf-readelf -W -S dualsense_fix.prx | tee build/sections.txt
-          powerpc64-ps3-elf-readelf -W -x .rodata dualsense_fix.prx | tee build/rodata.txt
-          powerpc64-ps3-elf-readelf -W -r dualsense_fix.prx | tee build/relocations.txt
-          grep -q 'DYN (Shared object file)' build/header.txt
-          grep -q 'Entry point address:.*0x0' build/header.txt
-          grep -q '.sys_proc_prx_param' build/sections.txt
-          grep -q '.lib.ent' build/sections.txt
-          grep -q '.lib.stub' build/sections.txt
-          grep -q 'bc9a0086 ab779874' build/rodata.txt
-          grep -q 'module_start' build/relocations.txt
-          grep -q 'module_stop' build/relocations.txt
-          sha256sum dualsense_fix.prx dualsense_fix.sprx | tee build/SHA256SUMS
+          $required = @{
+            PS3_SDK_TOKEN = $env:GH_TOKEN
+            PS3_SDK_REPOSITORY = $env:SDK_REPOSITORY
+            PS3_SDK_TAG = $env:SDK_TAG
+            PS3_SDK_ASSET = $env:SDK_ASSET
+            PS3_SDK_SHA256 = $env:SDK_SHA256
+          }
+          foreach ($entry in $required.GetEnumerator()) {
+            if ([string]::IsNullOrWhiteSpace($entry.Value)) {
+              throw "Missing Actions environment secret: $($entry.Key)"
+            }
+          }
+
+          $archive = Join-Path $env:RUNNER_TEMP "ps3-sdk-authorized.zip"
+          $sdkRoot = Join-Path $env:RUNNER_TEMP "ps3sdk"
+          gh release download $env:SDK_TAG `
+            --repo $env:SDK_REPOSITORY `
+            --pattern $env:SDK_ASSET `
+            --output $archive
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not download the authorized SDK archive"
+          }
+
+          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+          if (-not $actualHash.Equals($env:SDK_SHA256,
+              [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "PS3 SDK archive SHA-256 mismatch"
+          }
+
+          New-Item -ItemType Directory -Path $sdkRoot -Force | Out-Null
+          Expand-Archive -LiteralPath $archive -DestinationPath $sdkRoot
+          $cellSdk = Join-Path $sdkRoot "cell"
+          $requiredFiles = @(
+            "host-win32\ppu\bin\ppu-lv2-gcc.exe",
+            "host-win32\bin\make_fself.exe",
+            "samples\mk\sdk.makedef.mk",
+            "target\ppu\lib\libusbd_stub.a"
+          )
+          foreach ($relativePath in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $cellSdk $relativePath))) {
+              throw "Invalid SDK archive layout; missing cell/$relativePath"
+            }
+          }
+          "CELL_SDK_WIN=$cellSdk" | Out-File -FilePath $env:GITHUB_ENV `
+            -Encoding utf8 -Append
+
+      - name: Install GNU Make for MSYS2
+        shell: pwsh
+        run: |
+          & C:\msys64\usr\bin\pacman.exe --noconfirm -S --needed make
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not install GNU Make in MSYS2"
+          }
+
+      - name: Build PRX and SPRX with the official SDK
+        shell: pwsh
+        run: |
+          $cellSdk = $env:CELL_SDK_WIN.Replace('\', '/')
+          & C:\msys64\usr\bin\make.exe "CELL_SDK=$cellSdk" -B all
+          if ($LASTEXITCODE -ne 0) {
+            throw "Official PS3 SDK build failed"
+          }
+          if (-not (Test-Path -LiteralPath dualsense_fix.prx) -or
+              -not (Test-Path -LiteralPath dualsense_fix.sprx)) {
+            throw "The official build did not produce both PRX and SPRX"
+          }
+
+      - name: Inspect official PRX
+        shell: pwsh
+        run: |
+          $readelf = Join-Path $env:CELL_SDK_WIN `
+            "host-win32\ppu\bin\ppu-lv2-readelf.exe"
+          $objdump = Join-Path $env:CELL_SDK_WIN `
+            "host-win32\ppu\bin\ppu-lv2-objdump.exe"
+          New-Item -ItemType Directory -Path build -Force | Out-Null
+
+          $header = & $readelf -h dualsense_fix.prx 2>&1
+          $sections = & $objdump -h dualsense_fix.prx 2>&1
+          $symbols = & $readelf -W -s dualsense_fix.prx 2>&1
+          $header | Set-Content -Encoding ascii build/header.txt
+          $sections | Set-Content -Encoding ascii build/sections.txt
+          $symbols | Set-Content -Encoding ascii build/symbols.txt
+
+          $headerText = $header -join "`n"
+          $sectionText = $sections -join "`n"
+          $symbolText = $symbols -join "`n"
+          if ($headerText -notmatch 'Processor Specific: \(ffa4\)' -or
+              $headerText -notmatch 'Entry point address:\s+0x0') {
+            throw "Unexpected official PRX ELF header"
+          }
+          foreach ($section in @('.lib.ent', '.lib.stub',
+                                  '.rodata.sceModuleInfo', '.rodata.sceResident')) {
+            if (-not $sectionText.Contains($section)) {
+              throw "Missing official PRX section: $section"
+            }
+          }
+          foreach ($symbol in @('module_start', 'module_stop')) {
+            if (-not $symbolText.Contains($symbol)) {
+              throw "Missing official PRX symbol: $symbol"
+            }
+          }
+
+          Get-FileHash dualsense_fix.prx, dualsense_fix.sprx -Algorithm SHA256 |
+            ForEach-Object {
+              "$($_.Hash.ToLowerInvariant())  $(Split-Path $_.Path -Leaf)"
+            } | Set-Content -Encoding ascii build/SHA256SUMS
 
       - name: Upload plugin and diagnostics
         uses: actions/upload-artifact@v7
         with:
-          name: dualsense-fix-${{ github.sha }}
+          name: dualsense-fix-official-sdk-${{ github.sha }}
           if-no-files-found: error
           retention-days: 30
           path: |
             dualsense_fix.prx
             dualsense_fix.sprx
-            build/dualsense_fix.map
             build/header.txt
             build/sections.txt
-            build/rodata.txt
-            build/relocations.txt
+            build/symbols.txt
             build/SHA256SUMS
+
+      - name: Remove SDK from the runner workspace
+        if: always()
+        shell: pwsh
+        run: |
+          $sdkRoot = Join-Path $env:RUNNER_TEMP "ps3sdk"
+          $archive = Join-Path $env:RUNNER_TEMP "ps3-sdk-authorized.zip"
+          if (Test-Path -LiteralPath $sdkRoot) {
+            Remove-Item -LiteralPath $sdkRoot -Recurse -Force
+          }
+          if (Test-Path -LiteralPath $archive) {
+            Remove-Item -LiteralPath $archive -Force
+          }

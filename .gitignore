@@ -1,5 +1,7 @@
 build/
+objs/
 *.elf
 *.map
 *.prx
 *.sprx
+*.sym

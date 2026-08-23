@@ -1,7 +1,6 @@
-#include <lv2/sysfs.h>
+#include <cell/fs/cell_fs_file_api.h>
 #include <stdint.h>
-#include <sys/file.h>
-#include <sys/systime.h>
+#include <sys/sys_time.h>
 
 #include "diagnostics.h"
 
@@ -164,13 +163,13 @@ static void write_log_line(const char *level, const char *message, s32 has_error
     u32 length = 0;
     s32 fd = -1;
     u64 written = 0;
-    u64 seconds = 0;
-    u64 nanoseconds = 0;
+    sys_time_sec_t seconds = 0;
+    sys_time_nsec_t nanoseconds = 0;
 
     line[0] = '\0';
-    if (sysGetCurrentTime(&seconds, &nanoseconds) == 0) {
+    if (sys_time_get_current_time(&seconds, &nanoseconds) == 0) {
         length = append_text(line, length, LOG_LINE_SIZE, "[time=");
-        length = append_hex64(line, length, LOG_LINE_SIZE, seconds);
+        length = append_hex64(line, length, LOG_LINE_SIZE, (u64)seconds);
         length = append_text(line, length, LOG_LINE_SIZE, "] ");
     }
     length = append_text(line, length, LOG_LINE_SIZE, "[");
@@ -184,10 +183,10 @@ static void write_log_line(const char *level, const char *message, s32 has_error
     }
     length = append_text(line, length, LOG_LINE_SIZE, "\n");
 
-    if (sysLv2FsOpen(DS_LOG_PATH, SYS_O_WRONLY | SYS_O_CREAT | SYS_O_APPEND,
-                     &fd, 0666, 0, 0) == 0) {
-        sysLv2FsWrite(fd, line, length, &written);
-        sysLv2FsClose(fd);
+    if (cellFsOpen(DS_LOG_PATH, CELL_FS_O_WRONLY | CELL_FS_O_CREAT |
+                   CELL_FS_O_APPEND, &fd, NULL, 0) == 0) {
+        cellFsWrite(fd, line, length, &written);
+        cellFsClose(fd);
     }
 }
 
@@ -211,6 +210,24 @@ void ds_diag_shutdown(void)
 {
     write_log_line("INFO", "--- fin del plugin DualSense Fix ---", 0, 0);
     g_vsh_notify = 0;
+}
+
+void ds_diag_trace(const char *message)
+{
+    write_log_line("TRACE", message, 0, 0);
+}
+
+void ds_diag_trace_value(const char *message, s32 value)
+{
+    char line[LOG_LINE_SIZE];
+    u32 length = 0;
+
+    line[0] = '\0';
+    length = append_text(line, length, sizeof(line), message);
+    length = append_text(line, length, sizeof(line), " (value=");
+    length = append_hex64(line, length, sizeof(line), (u32)value);
+    append_text(line, length, sizeof(line), ")");
+    write_log_line("TRACE", line, 0, 0);
 }
 
 void ds_diag_info(const char *message, s32 show_notification)
