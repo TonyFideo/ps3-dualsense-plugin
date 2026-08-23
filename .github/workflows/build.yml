@@ -1,28 +1,73 @@
-name: Build PS3 Plugin
+name: Build DualSense Fix
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [master, "codex/**"]
   pull_request:
-    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PS3DEV_TAG: nightly-2026-07-26
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: mlafeldt/ps3dev:latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v6
 
-    - name: Build plugin
-      run: |
-        make
+      - name: Install pinned ps3dev toolchain
+        run: |
+          set -euo pipefail
+          archive="ps3dev-linux-X64.tar.gz"
+          curl -fL --retry 3 \
+            "https://github.com/ps3dev/ps3dev/releases/download/${PS3DEV_TAG}/${archive}" \
+            -o "$RUNNER_TEMP/$archive"
+          mkdir -p "$RUNNER_TEMP/ps3dev"
+          tar --no-same-owner -xzf "$RUNNER_TEMP/$archive" \
+            -C "$RUNNER_TEMP/ps3dev" --strip-components=1
 
-    - name: Upload Build Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ps3-dualsense-plugin
-        path: |
-          *.sprx
-          *.prx
+      - name: Build and inspect SPRX
+        env:
+          PS3DEV: ${{ runner.temp }}/ps3dev
+          PSL1GHT: ${{ runner.temp }}/ps3dev
+        run: |
+          set -euo pipefail
+          export PATH="$PS3DEV/bin:$PS3DEV/ppu/bin:$PATH"
+          make clean all
+          test -s dualsense_fix.prx
+          test -s dualsense_fix.sprx
+          powerpc64-ps3-elf-readelf -h dualsense_fix.prx | tee build/header.txt
+          powerpc64-ps3-elf-readelf -W -S dualsense_fix.prx | tee build/sections.txt
+          powerpc64-ps3-elf-readelf -W -x .rodata dualsense_fix.prx | tee build/rodata.txt
+          powerpc64-ps3-elf-readelf -W -r dualsense_fix.prx | tee build/relocations.txt
+          grep -q 'DYN (Shared object file)' build/header.txt
+          grep -q 'Entry point address:.*0x0' build/header.txt
+          grep -q '.sys_proc_prx_param' build/sections.txt
+          grep -q '.lib.ent' build/sections.txt
+          grep -q '.lib.stub' build/sections.txt
+          grep -q 'bc9a0086 ab779874' build/rodata.txt
+          grep -q 'module_start' build/relocations.txt
+          grep -q 'module_stop' build/relocations.txt
+          sha256sum dualsense_fix.prx dualsense_fix.sprx | tee build/SHA256SUMS
+
+      - name: Upload plugin and diagnostics
+        uses: actions/upload-artifact@v7
+        with:
+          name: dualsense-fix-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dualsense_fix.prx
+            dualsense_fix.sprx
+            build/dualsense_fix.map
+            build/header.txt
+            build/sections.txt
+            build/rodata.txt
+            build/relocations.txt
+            build/SHA256SUMS
