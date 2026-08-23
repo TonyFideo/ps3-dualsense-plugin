@@ -45,8 +45,7 @@ typedef struct __attribute__((packed)) ds_output_report_common {
     u8 left_trigger_effect[11];
     u8 reserved[6];
     u8 valid_flag2;
-    u8 effect_strength1;
-    u8 effect_strength2;
+    u8 effect_strength;
     u8 reserved2;
     u8 lightbar_setup;
     u8 led_brightness;
