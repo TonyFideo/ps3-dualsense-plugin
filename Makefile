@@ -1,33 +1,57 @@
-# PS3 PRX Makefile
-TARGET		:= dualsense_fix
-BUILD		:= build
-SOURCE		:= source
-INCLUDE		:= include
+TARGET      := dualsense_fix
+BUILD       := build
+SOURCES     := source
+INCLUDES    := include
 
-CFLAGS		:= -O2 -Wall -I$(INCLUDE) -I. -ffunction-sections -fdata-sections
-CXXFLAGS	:= $(CFLAGS) -fno-exceptions -fno-rtti
-LDFLAGS		:= -L. -Wl,--gc-sections -lusbd_stub -lio_stub -lfs_stub -lsysmodule_stub
-
-OBJS		:= $(BUILD)/main.o $(BUILD)/dualsense_usb.o
-
-# Asegurarse de que el SDK está seteado
+ifeq ($(strip $(PS3DEV)),)
+$(error PS3DEV is not defined)
+endif
 ifeq ($(strip $(PSL1GHT)),)
-$(error "Please set PSL1GHT in your environment")
+$(error PSL1GHT is not defined)
 endif
 
-include $(PSL1GHT)/ppu_rules
+CC          := $(PS3DEV)/ppu/bin/ppu-gcc
+STRIP       := $(PS3DEV)/ppu/bin/ppu-strip
+SPRX_LINKER := $(PS3DEV)/bin/sprxlinker
+MAKE_SELF   := $(PS3DEV)/bin/make_self
+CRT_SPRX    := $(PS3DEV)/ppu/powerpc64-ps3-elf/lib/lv2-sprx.o
 
-all: $(TARGET).prx
+CFILES      := $(wildcard $(SOURCES)/*.c)
+OFILES      := $(patsubst $(SOURCES)/%.c,$(BUILD)/%.o,$(CFILES))
 
-$(TARGET).prx: $(TARGET).elf
-	$(PRXGEN) $< $@
+CFLAGS      := -O2 -Wall -Wextra -Werror -std=gnu11 -ffreestanding \
+               -fno-builtin -fno-stack-protector -ffunction-sections \
+               -fdata-sections -I$(INCLUDES) -I$(PSL1GHT)/ppu/include
+LDFLAGS     := -shared -nostartfiles -nodefaultlibs -Wl,--gc-sections \
+               -Wl,-e,0 -Wl,-Map,$(BUILD)/$(TARGET).map
+LIBDIRS     := -L$(PSL1GHT)/ppu/lib
+LIBS        := -Wl,--start-group -lusb -lio -lsysmodule -llv2 \
+               -lgcc -Wl,--end-group
 
-$(TARGET).elf: $(OBJS)
-	$(CC) $(OBJS) $(LDFLAGS) -o $@
+.PHONY: all clean check-env
+all: $(TARGET).sprx $(TARGET).prx
 
-$(BUILD)/%.o: $(SOURCE)/%.c
-	@mkdir -p $(dir $@)
+check-env:
+	@test -x "$(CC)"
+	@test -x "$(SPRX_LINKER)"
+	@test -x "$(MAKE_SELF)"
+	@test -f "$(CRT_SPRX)"
+
+$(BUILD):
+	@mkdir -p $@
+
+$(BUILD)/%.o: $(SOURCES)/%.c | $(BUILD) check-env
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD)/$(TARGET).elf: $(OFILES) | $(BUILD) check-env
+	$(CC) $(LDFLAGS) $(CRT_SPRX) $(OFILES) $(LIBDIRS) $(LIBS) -o $@
+
+$(TARGET).prx: $(BUILD)/$(TARGET).elf
+	$(STRIP) -s $< -o $@
+	$(SPRX_LINKER) $@
+
+$(TARGET).sprx: $(TARGET).prx
+	$(MAKE_SELF) $< $@
+
 clean:
-	rm -rf $(BUILD) $(TARGET).elf $(TARGET).prx *.sprx
+	rm -rf $(BUILD) $(TARGET).prx $(TARGET).sprx
