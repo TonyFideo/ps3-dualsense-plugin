@@ -69,15 +69,21 @@ static const prx_library_entry g_module_exports
         (prx_pointer)g_module_entries
     };
 
-static const prx_module_info g_module_info
+/*
+ * LV2 locates this record through p_paddr of the first PRX LOAD segment.
+ * Keep it globally reachable and force it through --gc-sections from the
+ * linker command line.  The section name makes the linker place it beside the
+ * resident PRX metadata in segment zero without mixing assembler attributes.
+ */
+const prx_module_info g_module_info
     __attribute__((section(".rodata.sceModuleInfo.modInfo#"), aligned(4), used)) = {
         0,
-        {1, 0},
+        {0, 1},
         "dualsense_fix",
         0,
         (prx_pointer)0,
-        (prx_pointer)(__libentstart + 4),
+        (prx_pointer)__libentstart,
         (prx_pointer)__libentend,
-        (prx_pointer)(__libstubstart + 4),
+        (prx_pointer)__libstubstart,
         (prx_pointer)__libstubend
     };

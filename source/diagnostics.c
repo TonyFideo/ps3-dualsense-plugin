@@ -204,8 +204,8 @@ static void notify(const char *message)
 
 void ds_diag_init(void)
 {
-    g_vsh_notify = (vsh_notify_fn)find_vsh_export("vshtask", VSHTASK_NOTIFY_NID);
     write_log_line("INFO", "--- inicio del plugin DualSense Fix ---", 0, 0);
+    g_vsh_notify = (vsh_notify_fn)find_vsh_export("vshtask", VSHTASK_NOTIFY_NID);
     if (!g_vsh_notify) {
         write_log_line("WARN", "la exportacion de notificaciones VSH no esta disponible", 0, 0);
     }

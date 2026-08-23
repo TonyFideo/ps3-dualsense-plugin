@@ -44,28 +44,39 @@ superior derecha si un endpoint falla repetidamente.
 ## Compilación local con PSL1GHT
 
 Requiere la distribución de `ps3dev/ps3dev` que incluye el toolchain PPU,
-PSL1GHT, `sprxlinker` y `make_self`. La CI está fijada al release verificado
-`nightly-2026-07-26` para evitar cambios silenciosos del SDK.
+PSL1GHT y `sprxlinker`. También necesita `make_sprx`: es el `make_self.c` de
+PSL1GHT compilado con `-DSPRX`, que selecciona la identidad SELF de módulos
+VSH. El `make_self` normal **no** sirve para un plugin de `boot_plugins.txt`.
+La CI construye ese ejecutable desde una revisión y un tarball verificados.
 
 ```sh
 export PS3DEV=/ruta/a/ps3dev
 export PSL1GHT="$PS3DEV"
 export PATH="$PS3DEV/bin:$PS3DEV/ppu/bin:$PATH"
+# Compila tools/geohot/make_self.c de PSL1GHT con -DSPRX y deja el
+# ejecutable resultante en "$PS3DEV/bin/make_sprx".
 make clean all
 ```
 
 Salidas:
 
-- `dualsense_fix.prx`: PRX procesado, útil para inspección.
+- `dualsense_fix.prx`: PRX LV2 real `ET_SCE_PPURELA` (`0xffa4`), útil para
+  inspección; no se instala directamente.
 - `dualsense_fix.sprx`: plugin firmado para CFW/HEN.
 - `build/dualsense_fix.map`: mapa de enlace para depuración.
 
 ## GitHub Actions
 
 `.github/workflows/build.yml` descarga el release oficial precompilado y fijado
-de `ps3dev/ps3dev`, compila, verifica tipo, punto de entrada y secciones
-esenciales del PRX, calcula SHA-256 y publica todos los artefactos. No depende
-de una imagen Docker antigua ni de un comando `prxgen` inexistente.
+de `ps3dev/ps3dev`. El código C se compila con PSL1GHT. `tools/prxgen.py`
+convierte las relocaciones ELF al segmento `SCE_PPURELA` que espera LV2, y el
+modo SPRX del propio código abierto de PSL1GHT crea el SELF con Auth-ID de
+módulo VSH. No se usa ningún archivo del SDK propietario.
+
+La CI emula todas las relocaciones, valida `sceModuleInfo`, las exportaciones
+`module_start`/`module_stop`, el tipo `0xffa4`, el Auth-ID
+`1070000052000001` y el PRX embebido. Esto reemplaza la comprobación anterior
+de `ET_DYN`, que aceptaba un artefacto que Cobra no podía cargar como plugin.
 
 Antes de compilar para PPU también ejecuta `make test-host`. Esta prueba recorre
 una configuración USB compuesta con audio seguido de HID y endpoints estándar
@@ -78,14 +89,18 @@ de 7 bytes, además de casos truncados y salida OUT opcional.
    `/dev_hdd0/plugins/dualsense_fix.sprx`.
 3. Añádelo al mecanismo de carga de plugins de tu CFW/HEN (por ejemplo
    `boot_plugins.txt`) y reinicia VSH.
-4. Conecta solamente un DualSense estándar por USB; no conectes un DualSense
+4. Reinicia y, todavía en el XMB, comprueba que exista
+   `/dev_hdd0/tmp/dualsense_fix.log`. Debe contener `inicio del plugin` incluso
+   sin conectar el mando. Esta es la prueba independiente de que Cobra ejecutó
+   `module_start`.
+5. Conecta solamente un DualSense estándar por USB; no conectes un DualSense
    Edge ni actives PS3XPAD para el mismo VID/PID.
-5. Confirma las notificaciones “DualSense USB detectado”, “DualSense listo:
+6. Confirma las notificaciones “DualSense USB detectado”, “DualSense listo:
    mando y boton PS” y, cuando haya OUT, “DualSense: luz azul configurada”.
-6. Prueba sticks, cruceta, botones, gatillos y PS antes de abrir un juego. No
+7. Prueba sticks, cruceta, botones, gatillos y PS sin salir del XMB. No
    pruebes Bluetooth, audio, micrófono, parlante, vibración, touchpad ni
    sensores en esta versión.
-7. Si falla VSH o no responde, inicia sin cargar plugins, comenta o elimina la
+8. Si falla VSH o no responde, inicia sin cargar plugins, comenta o elimina la
    entrada de `boot_plugins.txt` y reinicia. Conserva una copia conocida buena
    del archivo y copia después
    `/dev_hdd0/tmp/dualsense_fix.log` antes de volver a probar.
@@ -100,7 +115,10 @@ PS3XPAD para el mismo VID/PID: ambos intentarían reclamar el dispositivo.
 - DualSense USB: informe `0x01` de 64 bytes; PS/Home es el bit 0 del tercer byte
   de botones (`raw report[10]`).
 - PS3XPAD: patrón de LDD virtual, modo de inserción en juegos, transferencias
-  USB asíncronas y resolución de la notificación VSH.
+  USB asíncronas y resolución de la notificación VSH. PS3XPAD se construye con
+  el SDK oficial (`ppu-lv2-gcc -mprx`, `ppu-lv2-prx-strip` y `scetool`); este
+  proyecto reproduce el formato de salida mediante herramientas abiertas para
+  conservar PSL1GHT como SDK de compilación.
 - El informe de entrada es `0x01` de 64 bytes; PS/Home usa `report[10]` bit 0
   y se inserta en `padData.button[0]` como `0x0001`.
 - El informe USB de salida `0x02` mide 63 bytes y se usa solamente para la

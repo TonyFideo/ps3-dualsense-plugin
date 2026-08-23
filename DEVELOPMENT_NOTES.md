@@ -37,24 +37,40 @@ DualSense estándar Sony `054c:0ce6` por USB. Aún requiere validación física.
 Las interfaces de audio permanecen en alternate setting 0; no hay soporte para
 audio, micrófono, parlante, Bluetooth, vibración, touchpad ni sensores.
 
-El registro se guarda en `/dev_hdd0/tmp/dualsense_fix.log`. La primera prueba
-segura debe empezar sin PS3XPAD para el mismo VID/PID, verificar detección,
-primer `padData` insertado, botón PS y luz azul, y conservar un método para
-arrancar sin la entrada del plugin si VSH falla.
+El registro se guarda en `/dev_hdd0/tmp/dualsense_fix.log`. `module_start`
+escribe su primera línea antes de resolver notificaciones o inicializar USB;
+por ello el archivo debe aparecer en el XMB incluso sin mando. La primera
+prueba segura debe empezar sin PS3XPAD para el mismo VID/PID, verificar carga,
+detección, primer `padData` insertado, botón PS y luz azul, y conservar un
+método para arrancar sin la entrada del plugin si VSH falla.
 
 ## SPRX con PSL1GHT
 
-PSL1GHT no incluye los macros propietarios `SYS_MODULE_*` ni la opción GCC
-`-mprx`. `source/prx_module.c` genera las tablas especiales `module_start` y
-`module_stop` mediante sus NID conocidos y punteros PRX de 32 bits. El enlace
-usa `-shared`, `lv2-sprx.o`, entrada cero y la cadena oficial:
+PSL1GHT no incluye los macros propietarios `SYS_MODULE_*`, la opción GCC
+`-mprx` ni `ppu-lv2-prx-strip`. `source/prx_module.c` genera `sceModuleInfo` y
+las tablas especiales `module_start`/`module_stop` mediante sus NID conocidos
+y punteros PRX de 32 bits.
 
-`ppu-strip -> sprxlinker -> make_self`
+La primera cadena usada (`-shared -> sprxlinker -> make_self`) producía un
+`ET_DYN`, eliminaba `sceModuleInfo` mediante `--gc-sections` y envolvía el ELF
+con el Auth-ID de aplicación retail. Cobra no llegó a ejecutar `module_start`:
+en la prueba física no hubo log, notificación ni actividad USB.
 
-La CI verifica que el PRX sea `ET_DYN`, tenga entrada `0x0` y conserve
-`.sys_proc_prx_param`, `.lib.ent` y `.lib.stub`. También ejecuta en el host un
-fixture de configuración compuesta audio + HID para impedir regresiones entre
-el descriptor endpoint USB de 7 bytes y la estructura PPU de 8 bytes.
+La cadena corregida conserva PSL1GHT:
+
+1. enlaza con `-Bsymbolic` para resolver localmente los stubs y retiene
+   `sceModuleInfo` en el primer segmento;
+2. `sprxlinker` ajusta las tablas PSL1GHT;
+3. `tools/prxgen.py` convierte relocaciones PPC64 en registros de 24 bytes y
+   emite `ET_SCE_PPURELA` (`0xffa4`) con `PT_SCE_PPURELA`;
+4. `tools/validate_prx.py` emula las relocaciones y valida módulo/exportaciones;
+5. `make_self.c` de PSL1GHT compilado con `-DSPRX` crea el SELF VSH, y
+   `tools/validate_self.py` comprueba Auth-ID y PRX embebido.
+
+PS3XPAD logra el mismo tipo de salida con el SDK propietario:
+`ppu-lv2-gcc -mprx -> ppu-lv2-prx-strip -> scetool`. Aquí no se incorpora el
+SDK propietario. La CI también ejecuta el fixture de configuración compuesta
+audio + HID para impedir regresiones del descriptor endpoint USB de 7 bytes.
 
 ## Decisiones y límites
 
