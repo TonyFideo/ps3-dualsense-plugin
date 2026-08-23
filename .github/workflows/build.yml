@@ -1,28 +1,85 @@
-name: Build PS3 Plugin
+name: Build DualSense Fix
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [master, "testeo/**"]
   pull_request:
-    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PS3DEV_TAG: nightly-2026-07-26
+  PSL1GHT_SOURCE_COMMIT: f649a08fd536a9e27c08c7db2d93a2d7ee4c3bbe
+  PSL1GHT_SOURCE_SHA256: 37683747db6bbae9715f80bc43bc477b86dd08da2e580807850e0415c500aa2e
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: mlafeldt/ps3dev:latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v6
 
-    - name: Build plugin
-      run: |
-        make
+      - name: Install pinned ps3dev toolchain
+        run: |
+          set -euo pipefail
+          archive="ps3dev-linux-X64.tar.gz"
+          curl -fL --retry 3 \
+            "https://github.com/ps3dev/ps3dev/releases/download/${PS3DEV_TAG}/${archive}" \
+            -o "$RUNNER_TEMP/$archive"
+          mkdir -p "$RUNNER_TEMP/ps3dev"
+          tar --no-same-owner -xzf "$RUNNER_TEMP/$archive" \
+            -C "$RUNNER_TEMP/ps3dev" --strip-components=1
 
-    - name: Upload Build Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ps3-dualsense-plugin
-        path: |
-          *.sprx
-          *.prx
+      - name: Build PSL1GHT VSH SELF wrapper
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgmp-dev libssl-dev zlib1g-dev
+          archive="$RUNNER_TEMP/psl1ght-source.tar.gz"
+          source_dir="$RUNNER_TEMP/psl1ght-source"
+          curl -fL --retry 3 \
+            "https://github.com/ps3dev/PSL1GHT/archive/${PSL1GHT_SOURCE_COMMIT}.tar.gz" \
+            -o "$archive"
+          echo "${PSL1GHT_SOURCE_SHA256}  $archive" | sha256sum -c -
+          mkdir -p "$source_dir"
+          tar --no-same-owner -xzf "$archive" -C "$source_dir" --strip-components=1
+          cc -O2 -DSPRX "$source_dir/tools/geohot/make_self.c" \
+            -lgmp -lcrypto -lz -o "$RUNNER_TEMP/ps3dev/bin/make_sprx"
+          test -x "$RUNNER_TEMP/ps3dev/bin/make_sprx"
+
+      - name: Build and inspect SPRX
+        env:
+          PS3DEV: ${{ runner.temp }}/ps3dev
+          PSL1GHT: ${{ runner.temp }}/ps3dev
+        run: |
+          set -euo pipefail
+          export PATH="$PS3DEV/bin:$PS3DEV/ppu/bin:$PATH"
+          make clean test-host all
+          test -s dualsense_fix.prx
+          test -s dualsense_fix.sprx
+          tools/validate_prx.py dualsense_fix.prx | tee build/prx-validation.txt
+          tools/validate_self.py dualsense_fix.sprx | tee build/self-validation.txt
+          powerpc64-ps3-elf-readelf -h -l dualsense_fix.prx | tee build/prx-layout.txt
+          grep -q 'Processor Specific: (ffa4)' build/prx-layout.txt
+          grep -q 'Entry point address:.*0x0' build/prx-layout.txt
+          grep -q 'LOPROC+a4' build/prx-layout.txt
+          sha256sum dualsense_fix.prx dualsense_fix.sprx | tee build/SHA256SUMS
+
+      - name: Upload plugin and diagnostics
+        uses: actions/upload-artifact@v7
+        with:
+          name: dualsense-fix-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dualsense_fix.prx
+            dualsense_fix.sprx
+            build/dualsense_fix.map
+            build/prx-layout.txt
+            build/prx-validation.txt
+            build/self-validation.txt
+            build/SHA256SUMS
