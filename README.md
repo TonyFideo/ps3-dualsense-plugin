@@ -14,6 +14,9 @@ genérico de PS3 omite.
 - La interfaz HID se busca dinámicamente por clase dentro de la configuración;
   no se fija el número de interfaz. Las interfaces de audio permanecen en
   alternate setting 0 y no se activan.
+- El analizador usa los tamaños USB transmitidos (interfaz 9, endpoint 7) y
+  decodifica los campos de 16 bits byte a byte, sin depender de la alineación
+  o del `sizeof` del ABI PPU.
 - La barra luminosa USB se configura en azul PlayStation al conectar, si el
   endpoint interrupt OUT está disponible. El mando sigue funcionando si no lo
   está o si falla esa transferencia.
@@ -63,6 +66,10 @@ Salidas:
 de `ps3dev/ps3dev`, compila, verifica tipo, punto de entrada y secciones
 esenciales del PRX, calcula SHA-256 y publica todos los artefactos. No depende
 de una imagen Docker antigua ni de un comando `prxgen` inexistente.
+
+Antes de compilar para PPU también ejecuta `make test-host`. Esta prueba recorre
+una configuración USB compuesta con audio seguido de HID y endpoints estándar
+de 7 bytes, además de casos truncados y salida OUT opcional.
 
 ## Instalación de prueba
 

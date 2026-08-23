@@ -193,6 +193,10 @@ static void write_log_line(const char *level, const char *message, s32 has_error
 
 static void notify(const char *message)
 {
+    if (!g_vsh_notify) {
+        g_vsh_notify = (vsh_notify_fn)find_vsh_export("vshtask",
+                                                       VSHTASK_NOTIFY_NID);
+    }
     if (g_vsh_notify) {
         g_vsh_notify(0, message);
     }

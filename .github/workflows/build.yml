@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$PS3DEV/bin:$PS3DEV/ppu/bin:$PATH"
-          make clean all
+          make clean test-host all
           test -s dualsense_fix.prx
           test -s dualsense_fix.sprx
           powerpc64-ps3-elf-readelf -h dualsense_fix.prx | tee build/header.txt

@@ -15,6 +15,8 @@ STRIP       := $(PS3DEV)/ppu/bin/ppu-strip
 SPRX_LINKER := $(PS3DEV)/bin/sprxlinker
 MAKE_SELF   := $(PS3DEV)/bin/make_self
 CRT_SPRX    := $(PS3DEV)/ppu/powerpc64-ps3-elf/lib/lv2-sprx.o
+HOST_CC     ?= cc
+HOST_TEST   := $(BUILD)/test_usb_descriptor_parser
 
 CFILES      := $(wildcard $(SOURCES)/*.c)
 OFILES      := $(patsubst $(SOURCES)/%.c,$(BUILD)/%.o,$(CFILES))
@@ -28,8 +30,11 @@ LIBDIRS     := -L$(PSL1GHT)/ppu/lib
 LIBS        := -Wl,--start-group -lusb -lio -lsysmodule -llv2 \
                -lgcc -Wl,--end-group
 
-.PHONY: all clean check-env
+.PHONY: all clean check-env test-host
 all: $(TARGET).sprx $(TARGET).prx
+
+test-host: $(HOST_TEST)
+	$(HOST_TEST)
 
 check-env:
 	@test -x "$(CC)"
@@ -42,6 +47,10 @@ $(BUILD):
 
 $(BUILD)/%.o: $(SOURCES)/%.c | $(BUILD) check-env
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(HOST_TEST): tests/test_usb_descriptor_parser.c \
+              source/usb_descriptor_parser.c | $(BUILD)
+	$(HOST_CC) -O2 -Wall -Wextra -Werror -std=c11 -I$(INCLUDES) $^ -o $@
 
 $(BUILD)/$(TARGET).elf: $(OFILES) | $(BUILD) check-env
 	$(CC) $(LDFLAGS) $(CRT_SPRX) $(OFILES) $(LIBDIRS) $(LIBS) -o $@

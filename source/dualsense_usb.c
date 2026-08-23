@@ -6,6 +6,7 @@
 
 #include "diagnostics.h"
 #include "dualsense_usb.h"
+#include "usb_descriptor_parser.h"
 
 #define DS_INPUT_REPORT_SIZE 64u
 #define DS_INPUT_REPORT_ID 0x01u
@@ -15,7 +16,6 @@
 #define DS_INSERT_GAME_MODE 1u
 #define DS_CAPABILITIES ((1u << 0) | (1u << 3))
 #define DS_MAX_CONFIGURATION_LENGTH 4096u
-#define DS_ENDPOINT_PACKET_SIZE_MASK 0x07ffu
 #define DS_STATS_WINDOW_NANOSECONDS 1000000000u
 #define BIT(value) (1u << (value))
 #define SWAP16(value) ((u16)((((u16)(value) & 0xffu) << 8) | \
@@ -169,6 +169,8 @@ static s32 virtual_pad_register(void)
     g_ds.pad_handle = debug_handle;
 
     if (register_result == 0 && debug_handle >= 0) {
+        /* PS3XPAD waits for LV2 to finish publishing the new LDD handle. */
+        sysUsleep(10000u);
         insert_mode_result = debug_enable_game_insertion(debug_handle);
         if (insert_mode_result == 0) {
             advanced_used = 1;
@@ -537,18 +539,13 @@ static s32 ds_probe(s32 device_id)
 
 static s32 ds_attach(s32 device_id)
 {
-    usbConfigDescriptor *configuration;
-    usbInterfaceDescriptor *hid_interface = 0;
-    usbEndpointDescriptor *input_endpoint = 0;
-    usbEndpointDescriptor *output_endpoint = 0;
-    const u8 *cursor;
-    const u8 *configuration_end;
+    const u8 *configuration;
+    usbEndpointDescriptor *input_endpoint;
+    usbEndpointDescriptor *output_endpoint;
+    ds_usb_layout layout;
     u32 configuration_length;
-    u8 hid_active = 0;
-    u8 hid_found = 0;
     u8 speed = 0;
-    u16 input_packet_size;
-    u16 output_packet_size = 0;
+    s32 parse_result;
     s32 speed_result;
     s32 result;
 
@@ -558,114 +555,45 @@ static s32 ds_attach(s32 device_id)
     context_reset();
     g_ds.device_id = device_id;
 
-    configuration = (usbConfigDescriptor *)usbScanStaticDescriptor(
+    configuration = (const u8 *)usbScanStaticDescriptor(
         device_id, 0, USB_DESCRIPTOR_TYPE_CONFIG);
     if (!configuration) {
         ds_diag_error("DualSense Fix: descriptor de configuracion ausente", -1, 1);
         return USB_ATTACH_FAILED;
     }
-    configuration_length = SWAP16(configuration->wTotalLength);
-    if (configuration->bLength < 2u ||
-        configuration_length < configuration->bLength ||
+    if (configuration[0] < 4u) {
+        ds_diag_error("DualSense Fix: descriptor de configuracion invalido", -1, 1);
+        return USB_ATTACH_FAILED;
+    }
+    configuration_length = ds_usb_read_le16(configuration + 2u);
+    if (configuration_length < configuration[0] ||
         configuration_length > DS_MAX_CONFIGURATION_LENGTH) {
         ds_diag_error("DualSense Fix: longitud de configuracion USB invalida", -1, 1);
         return USB_ATTACH_FAILED;
     }
-
-    cursor = (const u8 *)configuration;
-    configuration_end = cursor + configuration_length;
-    while (cursor < configuration_end) {
-        u32 remaining = (u32)(configuration_end - cursor);
-        u8 descriptor_length;
-        u8 descriptor_type;
-
-        if (remaining < 2u) {
-            ds_diag_error("DualSense Fix: descriptor USB truncado", -1, 1);
-            return USB_ATTACH_FAILED;
-        }
-        descriptor_length = cursor[0];
-        descriptor_type = cursor[1];
-        if (descriptor_length < 2u || (u32)descriptor_length > remaining) {
-            ds_diag_error("DualSense Fix: descriptor USB invalido", -1, 1);
-            return USB_ATTACH_FAILED;
-        }
-
-        if (descriptor_type == USB_DESCRIPTOR_TYPE_INTERFACE) {
-            usbInterfaceDescriptor *interface = (usbInterfaceDescriptor *)cursor;
-
-            if (descriptor_length < sizeof(*interface)) {
-                ds_diag_error("DualSense Fix: interfaz USB invalida", -1, 1);
-                return USB_ATTACH_FAILED;
-            }
-            if (hid_active && input_endpoint) {
-                hid_found = 1;
-                hid_active = 0;
-            }
-            if (!hid_found) {
-                hid_active = 0;
-                input_endpoint = 0;
-                output_endpoint = 0;
-                hid_interface = 0;
-                if (interface->bInterfaceClass == USB_CLASS_HID) {
-                    hid_active = 1;
-                    hid_interface = interface;
-                }
-            }
-        } else if (descriptor_type == USB_DESCRIPTOR_TYPE_ENDPOINT && hid_active) {
-            usbEndpointDescriptor *endpoint = (usbEndpointDescriptor *)cursor;
-            u8 direction;
-            u16 packet_size;
-
-            if (descriptor_length < sizeof(*endpoint)) {
-                ds_diag_error("DualSense Fix: endpoint USB invalido", -1, 1);
-                return USB_ATTACH_FAILED;
-            }
-            if ((endpoint->bmAttributes & USB_ENDPOINT_TRANSFER_TYPE_BITS) ==
-                USB_ENDPOINT_TRANSFER_TYPE_INTERRUPT) {
-                direction = endpoint->bEndpointAddress & USB_ENDPOINT_DIRECTION_BITS;
-                packet_size = SWAP16(endpoint->wMaxPacketSize) &
-                              DS_ENDPOINT_PACKET_SIZE_MASK;
-                if (direction == USB_ENDPOINT_DIRECTION_IN && !input_endpoint &&
-                    packet_size >= (u16)DS_INPUT_REPORT_SIZE) {
-                    input_endpoint = endpoint;
-                } else if (direction == USB_ENDPOINT_DIRECTION_OUT &&
-                           !output_endpoint) {
-                    output_endpoint = endpoint;
-                }
-            }
-        }
-        cursor += descriptor_length;
-    }
-    if (hid_active && input_endpoint) {
-        hid_found = 1;
-    }
-    if (!hid_found || !hid_interface || !input_endpoint) {
+    parse_result = ds_usb_parse_configuration(configuration,
+                                              configuration_length, &layout);
+    if (parse_result != DS_USB_PARSE_OK) {
         ds_diag_error("DualSense Fix: interfaz HID con entrada de 64 bytes no encontrada",
-                      -1, 1);
+                      parse_result, 1);
         return USB_ATTACH_FAILED;
     }
 
-    input_packet_size = SWAP16(input_endpoint->wMaxPacketSize) &
-                        DS_ENDPOINT_PACKET_SIZE_MASK;
-    if (output_endpoint) {
-        output_packet_size = SWAP16(output_endpoint->wMaxPacketSize) &
-                             DS_ENDPOINT_PACKET_SIZE_MASK;
-    }
+    input_endpoint = (usbEndpointDescriptor *)layout.input_endpoint;
+    output_endpoint = (usbEndpointDescriptor *)layout.output_endpoint;
     speed_result = usbGetDeviceSpeed(device_id, &speed);
-    ds_diag_usb_layout(configuration->bConfigurationValue,
-                       configuration->bNumInterfaces,
-                       hid_interface->bInterfaceNumber,
-                       hid_interface->bAlternateSetting,
-                       input_endpoint->bEndpointAddress, input_packet_size,
-                       input_endpoint->bInterval,
-                       output_endpoint ? output_endpoint->bEndpointAddress : -1,
-                       output_packet_size,
-                       output_endpoint ? output_endpoint->bInterval : 0u,
+    ds_diag_usb_layout(layout.configuration_value, layout.interface_count,
+                       layout.interface_number, layout.alternate_setting,
+                       layout.input_address, layout.input_packet_size,
+                       layout.input_interval,
+                       output_endpoint ? layout.output_address : -1,
+                       layout.output_packet_size,
+                       layout.output_interval,
                        speed_result, speed);
 
-    g_ds.configuration = configuration->bConfigurationValue;
-    g_ds.interface_number = hid_interface->bInterfaceNumber;
-    g_ds.alternate_setting = hid_interface->bAlternateSetting;
+    g_ds.configuration = layout.configuration_value;
+    g_ds.interface_number = layout.interface_number;
+    g_ds.alternate_setting = layout.alternate_setting;
     g_ds.control_pipe = usbOpenPipe(device_id, 0);
     g_ds.input_pipe = usbOpenPipe(device_id, input_endpoint);
     if (output_endpoint) {

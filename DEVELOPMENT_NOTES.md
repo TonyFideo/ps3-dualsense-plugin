@@ -15,8 +15,12 @@ PSL1GHT actual (`CellUsbdLddOps`, `cellUsbd*`, `SYSMODULE_USBD`,
    valida cada descriptor y descubre por clase la interfaz HID y sus endpoints
    interrupt IN/OUT. No se fija la interfaz 3, aunque sea la habitual del
    DualSense estándar.
+   El análisis está aislado en `usb_descriptor_parser.c`: usa los tamaños del
+   protocolo USB, acepta endpoints estándar de 7 bytes y lee `wMaxPacketSize`
+   sin accesos PPU desalineados.
 3. Se crea un pad LDD; se intenta primero el modo de registro/inserción usado
-   por PS3XPAD y se cae a `ioPadLddRegisterController` si no está disponible.
+   por PS3XPAD, incluyendo su espera de 10 ms antes del modo de inserción, y se
+   cae a `ioPadLddRegisterController` si no está disponible.
 4. Una transferencia interrupt asíncrona de 64 bytes se rearma en cada callback.
 5. El informe DualSense se traduce a `padData`; PS/Home (`report[10] & 1`) se
    inserta en `button[0]` como `0x0001`.
@@ -48,7 +52,9 @@ usa `-shared`, `lv2-sprx.o`, entrada cero y la cadena oficial:
 `ppu-strip -> sprxlinker -> make_self`
 
 La CI verifica que el PRX sea `ET_DYN`, tenga entrada `0x0` y conserve
-`.sys_proc_prx_param`, `.lib.ent` y `.lib.stub`.
+`.sys_proc_prx_param`, `.lib.ent` y `.lib.stub`. También ejecuta en el host un
+fixture de configuración compuesta audio + HID para impedir regresiones entre
+el descriptor endpoint USB de 7 bytes y la estructura PPU de 8 bytes.
 
 ## Decisiones y límites
 
