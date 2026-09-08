@@ -6,15 +6,14 @@ soporte genérico de PS3 omite.
 
 ## Estado actual
 
-- Objetivo del MVP: DualSense estándar por USB, incluida la tecla PS.
-- Traducción: sticks, cruceta, botones frontales, L1/R1, L2/R2,
-  Create/Options, L3/R3 y PS.
-- Descubrimiento dinámico de la interfaz HID y sus endpoints interrupt IN/OUT.
-- Barra luminosa azul opcional; un fallo de salida no impide usar el mando.
+- DualSense estándar por USB.
+- Detección del boton PS.
+- Descubrimiento dinámico mediante HID.
+- Barra led opcional.
 - Bluetooth, vibración, audio, micrófono, parlante, touchpad y sensores siguen
   pendientes.
-- La compilación con el SDK oficial está validada localmente. La ejecución en
-  una PS3 física continúa pendiente.
+- La compilación con el SDK oficial está validada localmente. La ejecución solo en una consola CFW.
+- Basado por ps3xpad.
 
 ## Diagnóstico
 
@@ -51,24 +50,15 @@ La compilación usa `-Wall -Wextra -Werror`, las reglas oficiales
 `sdk.makedef.mk`/`sdk.target.mk` y las librerías stub de `cellUsbd`, `cellPad`,
 `cellSysmodule` y `cellFs`.
 
-## GitHub Actions
-
-El SDK no se guarda en este repositorio ni dentro de secretos de Actions. El
-workflow de Windows descarga un ZIP desde un release privado autorizado,
-comprueba su SHA-256, compila y elimina el SDK del runner antes de terminar.
-
-La preparación del repositorio privado, el archivo y los secretos se describe
-en [docs/PS3_SDK_GITHUB_ACTIONS.md](docs/PS3_SDK_GITHUB_ACTIONS.md).
-
-No se ejecuta CI en `pull_request`, porque una compilación que accede al SDK
-privado no debe aceptar código no confiable.
+## Releases y Actions
+Todo esto esta en etapa de pruebas, se comparte el source code pero TÚ tendras que compilarlo o rasgar de Actions hasta que tenga mas funciones que solo el boton PS y LED.
 
 ## Instalación de prueba
 
 1. Copia `dualsense_fix.sprx` a una ruta de plugins, por ejemplo
    `/dev_hdd0/plugins/dualsense_fix.sprx`.
-2. Añádelo al mecanismo de carga de plugins de CFW/HEN y reinicia VSH.
-3. Conecta solamente un DualSense estándar por USB.
+2. Añádelo al mecanismo de carga de plugins de CFW/HEN y reinicia el VSH.
+3. Conecta el DualSense por USB.
 4. No cargues PS3XPAD simultáneamente para el mismo VID/PID: ambos drivers
    intentarían reclamar el mismo dispositivo USB.
 5. Confirma las notificaciones de detección, primera inserción LDD y, si existe
